@@ -23,23 +23,16 @@ void consulta_Pacote(pacote_UDP* P){
     printf("\nDados:%u",P->Dados);
 }
 
-void Checksum(pacote_UDP* P,int bytes)
-{
-
-}
-
 void preenche_Pacote(pacote_UDP* P){
     printf("\nPorta de Origem:");
     scanf("%hu",&P->porta_Origem);
     printf("\nPorta de Destino:");
     scanf("%hu",&P->porta_Destino);
     printf("\nChecksum:");
-
     printf("\nDados:");
     scanf("%u",&P->Dados);
-    P->Tamanho=sizeof(P->porta_Origem) + sizeof(P->porta_Destino) + sizeof(P->Dados);
+    P->Tamanho=sizeof(P->porta_Origem) + sizeof(P->porta_Destino) + sizeof(P->Dados) + sizeof(P->Tamanho) + sizeof(P->Checksum);
 }
-
 // libera memoria (free)
 void libera_Pacote(pacote_UDP* P){
     free(P);
