@@ -38,13 +38,13 @@ ssize_t NetLayer::SendDataTo(const void * buf, size_t len, const char * dest_add
         aux = (net_packet *) malloc(sizeof(net_packet));
         preparePacket(aux, ptr, _fragmentSize, dest_addr, dest_port);
         ptr=(byte*)buf+_fragmentSize;
-        packets.push_back(*aux);
+        packets.push_back(aux);
     }    
 
     if(remainder != 0){
         aux = (net_packet *) malloc(sizeof(net_packet));
         preparePacket(aux, ptr, remainder, dest_addr, dest_port);
-        packets.push_back(*aux);
+        packets.push_back(aux);
     }
 
     //call f( _sendNetPackets ) to send netpackets
@@ -139,16 +139,22 @@ int NetLayer::_sendNetPackets(net_packet_list * list, const char * dest_addr, un
     dest.sin_addr.s_addr = inet_addr(dest_addr);
     dest.sin_family = AF_INET;
     dest.sin_port = dest_port;
-    int count=0;
+    int count=0, ret=0;
     for(net_packet_list::iterator it=list->begin();it!=list->end();++it){
-        if (sendto(s, it->datagram, (size_t)it->iph->tot_len, 0, (struct sockaddr *)&dest, sizeof(dest)) < 0) {
-            perror("sendto failed");
-            return -1;
+        if(ret!=-1){
+            if (sendto(s, (*it)->datagram, (size_t)(*it)->iph->tot_len, 0, (struct sockaddr *)&dest, sizeof(dest)) < 0) {
+                perror("sendto failed");
+                ret=-1;
+            }
+            else{
+                printf("(%d) Packet Send. Length : %d \n" , count++, (*it)->iph->tot_len);
+            }
         }
-        else
-            printf ("(%d) Packet Send. Length : %d \n" , count++, it->iph->tot_len);
+        net_packet * ptr = (net_packet*) *it;
+        free(ptr);
         sleep(1);
     }
+    return ret;
 }
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
 void NetLayer::_initialize(bool tcp, unsigned short local_port, char * spoof_localAddr, unsigned short fragment_size/*in bytes*/) {

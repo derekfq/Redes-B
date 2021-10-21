@@ -19,7 +19,7 @@ typedef struct {
     //application layer (Payload)
     byte datagram[MTU];
 } net_packet;
-typedef std::list<net_packet> net_packet_list;
+typedef std::list<net_packet*> net_packet_list;
 //- Classes --------------------------------------------------------------------
 class NetLayer {
     //- variables ----
