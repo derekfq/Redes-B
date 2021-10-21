@@ -52,8 +52,7 @@ private:
     void _initialize(bool tcp, unsigned short local_port=0, char * spoof_localAddr=NULL, unsigned short fragment_size/*in bytes*/=MTU);
     /* Terminates class allocations */
     void _terminate();
-    uint16_t preparePacket(net_packet * p, byte * payload, unsigned short payloadSize, const char * dest_addr, unsigned short dest_port, uint16_t fragment_offset
-                            , bool doFragment);
+    uint16_t preparePacket(net_packet * p, byte * payload, unsigned short payloadSize, const char * dest_addr, unsigned short dest_port);
 }; 
 //------------------------------------------------------------------------------
 /* 96 bit (12 bytes) pseudo header needed for tcp header checksum calculation */

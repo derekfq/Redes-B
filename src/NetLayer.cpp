@@ -25,7 +25,7 @@ ssize_t NetLayer::SendDataTo(const void * buf, size_t len, const char * dest_add
     //receives raw input to send as a buffer
     //and fills up NetPacket list structure
     net_packet_list packets;
-    net_packet aux;
+    net_packet * aux;
     int packets_total = (len/_fragmentSize);
     int remainder = (len%_fragmentSize);
 
@@ -33,33 +33,26 @@ ssize_t NetLayer::SendDataTo(const void * buf, size_t len, const char * dest_add
 
     if(remainder==0 && packets_total==0) { packets_total=1; }
 
-    int nextPacketOffset=0;
+    int nextPacketOffset=0;//TODO: Re-elaborar o packeting fragments para funcionar corretamente
     for(int i=0;i<packets_total;i++){
-        aux;
-        //TODO: Re-elaborar o packeting fragments para funcionar corretamente
-        //testes> quando funciona len=41, não funciona para len=40
-        //erro no wireshark----> [BAD UDP LENGTH 48 > IP PAYLOAD LENGHT] LEN=40
-
-        //quando o fragment é = strlen() OK
-        nextPacketOffset = preparePacket(&aux, ptr, _fragmentSize, dest_addr, dest_port, nextPacketOffset, (remainder==0)?false:true);
+        aux = (net_packet *) malloc(sizeof(net_packet));
+        preparePacket(aux, ptr, _fragmentSize, dest_addr, dest_port);
         ptr=(byte*)buf+_fragmentSize;
-        packets.push_back(aux);
-    }
-
-    
+        packets.push_back(*aux);
+    }    
 
     if(remainder != 0){
-        aux; // = preparo o pacote por completo
-        preparePacket(&aux, ptr, remainder /**8 + ((remainder%8!=0)?1:0)*/, dest_addr, dest_port, nextPacketOffset, false);
-        packets.push_back(aux);
+        aux = (net_packet *) malloc(sizeof(net_packet));
+        preparePacket(aux, ptr, remainder, dest_addr, dest_port);
+        packets.push_back(*aux);
     }
 
     //call f( _sendNetPackets ) to send netpackets
     _sendNetPackets(&packets, dest_addr, dest_port);
 }
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
-uint16_t NetLayer::preparePacket(net_packet * p, byte * payload, unsigned short payloadSize, const char * dest_addr, unsigned short dest_port
-                            , uint16_t fragment_offset, bool doFragment) { /*return next packet offset*/
+uint16_t NetLayer::preparePacket(net_packet * p, byte * payload, unsigned short payloadSize, const char * dest_addr, unsigned short dest_port) { /*return next packet offset*/
+    uint16_t ret=0;
     memset(p->datagram, 0, MTU);
     byte * data;
     p->iph = (struct iphdr *)(p->datagram);
@@ -73,23 +66,16 @@ uint16_t NetLayer::preparePacket(net_packet * p, byte * payload, unsigned short 
         p->tcph = NULL;
         data = p->datagram + sizeof(struct iphdr) + sizeof(struct udphdr);
     }
-
-    uint16_t ret=0x0000;
     
     memcpy(data, payload, payloadSize);
 
     p->iph->version = 4;
     p->iph->ihl = 5;
     p->iph->tos = 0;
-    p->iph->tot_len = sizeof(struct iphdr) + ((_protoTCP) ? sizeof(struct tcphdr) : sizeof(struct udphdr));
-    p->iph->tot_len += payloadSize;
+    p->iph->tot_len = sizeof(struct iphdr) + ((_protoTCP)?sizeof(struct tcphdr):sizeof(struct udphdr)) + payloadSize;
     p->iph->id = htons(54321);//posso deixar fixo mas seria legal variar para fragmentacao e reassembly                 *
 //...
-    p->iph->frag_off = 0;// (doFragment)?0x2000:0x0000 | fragment_offset;
-    //fragment_offset agora deve conter infos. sobre o proximo fragment
-    //fragment_offset += (payloadSize/8) + ((payloadSize%8!=0)?1 : 0);
-    //fix flags
-    ret=fragment_offset;
+    p->iph->frag_off = 0;
 //...
     p->iph->ttl = 255;
     p->iph->protocol = (_protoTCP) ? IPPROTO_TCP : IPPROTO_UDP;
@@ -116,7 +102,9 @@ uint16_t NetLayer::preparePacket(net_packet * p, byte * payload, unsigned short 
     } else {
         p->udph->source = localaddr.sin_port;
         p->udph->dest = htons(dest_port);
-        p->udph->len = htons(sizeof(struct udphdr) + payloadSize);
+        int aux = sizeof(struct udphdr) + payloadSize;
+        //aux += (aux%8==0)?0:1;
+        p->udph->len = htons(aux);
         p->udph->check = 0;
     }
 
@@ -125,17 +113,23 @@ uint16_t NetLayer::preparePacket(net_packet * p, byte * payload, unsigned short 
 	psh.dest_address = p->iph->daddr;
 	psh.placeholder = 0;
 	psh.protocol = (_protoTCP) ? IPPROTO_TCP : IPPROTO_UDP;
-	psh.transport_length = htons(((_protoTCP)? sizeof(struct tcphdr):sizeof(struct udphdr)) + payloadSize ); 
+    psh.transport_length = htons(((_protoTCP) ? sizeof(struct tcphdr) : sizeof(struct udphdr)) + payloadSize);
 	
 	int psize = sizeof(struct pseudo_header) + ((_protoTCP)? sizeof(struct tcphdr):sizeof(struct udphdr)) + payloadSize; 
-	char * pseudogram = (char*) malloc(psize);
 	
+    char * pseudogram = (char*) malloc(psize);
 	memcpy(pseudogram , (char*) &psh , sizeof (struct pseudo_header));
-	memcpy(pseudogram + sizeof(struct pseudo_header) , &p->tcph , ((_protoTCP)? sizeof(struct tcphdr):sizeof(struct udphdr)) + payloadSize);
-    if(_protoTCP)
-	    p->tcph->check = csum((unsigned short*) pseudogram , psize);
-    else
+	
+    if(_protoTCP){
+        memcpy(pseudogram + sizeof(struct pseudo_header) , &p->tcph , (sizeof(struct tcphdr) + payloadSize));
+        p->tcph->check = csum((unsigned short*) pseudogram , psize);
+    }
+	    
+    else {
+        memcpy(pseudogram + sizeof(struct pseudo_header) , &p->udph , (sizeof(struct udphdr) + payloadSize));
         p->udph->check = csum((unsigned short*) pseudogram , psize);
+    }
+        
 	free(pseudogram);
     return ret;
 }
@@ -146,8 +140,8 @@ int NetLayer::_sendNetPackets(net_packet_list * list, const char * dest_addr, un
     dest.sin_family = AF_INET;
     dest.sin_port = dest_port;
     int count=0;
-    for(auto it=list->begin();it!=list->end();++it){
-        if (sendto(s, it->datagram, it->iph->tot_len, 0, (struct sockaddr *)&dest, sizeof(dest)) < 0) {
+    for(net_packet_list::iterator it=list->begin();it!=list->end();++it){
+        if (sendto(s, it->datagram, (size_t)it->iph->tot_len, 0, (struct sockaddr *)&dest, sizeof(dest)) < 0) {
             perror("sendto failed");
             return -1;
         }
