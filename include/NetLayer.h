@@ -7,43 +7,64 @@
 #include <errno.h>          //For errno - the error number
 
 //- defines --------------------------------------------------------------------
-typedef struct {
-    //network layer (IPv4 headers)
-    //transport layer (UDP/TCP) <talvez aqui seja interessante union>
-    //application layer (Payload)
-} NetPacket;
-typedef std::list<NetPacket *> NetPacketList;
+#define MTU 1500
+
 typedef unsigned char byte;
+typedef struct {
+    //network layer (IPv4 header)
+    struct iphdr * iph;
+    //transport layer (UDP/TCP)
+    struct udphdr * udph;
+    struct tcphdr * tcph;
+    //application layer (Payload)
+    byte datagram[MTU];
+} net_packet;
+typedef std::list<net_packet> net_packet_list;
 //- Classes --------------------------------------------------------------------
 class NetLayer {
     //- variables ----
 private:
-    NetPacketList pckts;
     struct sockaddr_in localaddr; //includes ip and port
-    bool spoofed=false;
     int s, r; //sending and receiving sockets.
+    bool _protoTCP;
+    //FRAGMENT SIZE IN BYTES FROM BITS ROUNDED UP
+    //FSBBU
+    unsigned short _fragmentSize;
+
 public:
     //- Constructors -
     /* Ideal para somente envios */
-    NetLayer(int proto);
+    NetLayer(bool tcp, unsigned short fragment_size/*in bytes*/=MTU);
     /* Ideal para receber numa porta fixa */
-    NetLayer(int proto, unsigned short local_port);
+    NetLayer(bool tcp, unsigned short local_port, unsigned short fragment_size/*in bytes*/=MTU);
     /* Ideal para spoofar o endereço  de ip local */ //(Se passar)
-    NetLayer(int proto, unsigned short local_port, char * spoofed_localAddress);
+    NetLayer(bool tcp, unsigned short local_port, char * spoofed_localAddress, unsigned short fragment_size/*in bytes*/=MTU);
     ~NetLayer();
     //- functions ----
     ssize_t SendDataTo(const void * buf, size_t len, const char * dest_addr, unsigned short dest_port);
     //ssize_t RecvDataFrom(void * buf, size_t len, const char * dest_addr, unsigned short dest_port);
     //Getters&Setters
-    void GetLocalIpAddress(char * ip, unsigned short size);
-    unsigned short GetLocalPort();
+    struct sockaddr_in GetLocalAddress();
 private:
-    ssize_t _sendDataTo(const void * buf, size_t len, const char * dest_addr, unsigned short dest_port);
-    ssize_t _spoofed_sendDataTo(const void * buf, size_t len, const char * dest_addr, unsigned short dest_port);
+    int _sendNetPackets(net_packet_list * list, const char * dest_addr, unsigned short dest_port);
     /* Initializes upon a random local port by default (local_port=0),
        using spoofed_localAddr=NULL by default means no spoofing Local Address. */
-    void _initialize(int proto, unsigned short local_port=0, char * spoof_localAddr=NULL);
+    void _initialize(bool tcp, unsigned short local_port=0, char * spoof_localAddr=NULL, unsigned short fragment_size/*in bytes*/=MTU);
     /* Terminates class allocations */
     void _terminate();
+    uint16_t preparePacket(net_packet * p, byte * payload, unsigned short payloadSize, const char * dest_addr, unsigned short dest_port, uint16_t fragment_offset
+                            , bool doFragment);
 }; 
 //------------------------------------------------------------------------------
+/* 96 bit (12 bytes) pseudo header needed for tcp header checksum calculation */
+struct pseudo_header {
+	u_int32_t source_address;
+	u_int32_t dest_address;
+	u_int8_t placeholder;
+	u_int8_t protocol;
+	u_int16_t transport_length;
+};
+
+/*	Generic checksum calculation function   */
+unsigned short csum(unsigned short *ptr,int nbytes);
+
