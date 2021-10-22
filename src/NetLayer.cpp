@@ -21,7 +21,7 @@ NetLayer::NetLayer(bool tcp, unsigned short local_port, char * spoofed_localAddr
 NetLayer::~NetLayer() { _terminate(); }
 
 //-- functions ---------------------------------------------------------------------------------------------------------
-ssize_t NetLayer::SendDataTo(const void * buf, size_t len, const char * dest_addr, unsigned short dest_port) { //retornar dados relacionado ao NetLayer (talvez total de pacotes enviados ou codigos de erro)
+ssize_t NetLayer::SendDataTo(const void * buf, size_t len, const char * dest_addr, unsigned short dest_port) {
     //receives raw input to send as a buffer
     //and fills up NetPacket list structure
     net_packet_list packets;
@@ -33,17 +33,33 @@ ssize_t NetLayer::SendDataTo(const void * buf, size_t len, const char * dest_add
 
     if(remainder==0 && packets_total==0) { packets_total=1; }
 
-    int nextPacketOffset=0;//TODO: Re-elaborar o packeting fragments para funcionar corretamente
+    //TODO: Corrigir problema da fragmentacao a nivel de IP
+    //Se setar a flag de MoreFragments(MF)=1 ja nao funciona
+
+    //tudo que esta comentado em SendDataTo & preparePacket ---> tentativa
+
+    //dica de solucao: talvez ver exemplo no arquivo      tearsdrop.cap 
+    //o fragmento vem com erro [BAD UDP LENGTH 36 > IP PAYLOAD Length=28]
+
+    //to achando que o cabećalho udp so vai na segunda, na primeira so tem ate o IP
+    //no fragmento eh completo dai
+
+    //https://packetpushers.net/ip-fragmentation-in-detail/
+    //https://blog.cloudflare.com/ip-fragmentation-is-broken/
+
+    int nextPacketOffset=0;
     for(int i=0;i<packets_total;i++){
         aux = (net_packet *) malloc(sizeof(net_packet));
-        preparePacket(aux, ptr, _fragmentSize, dest_addr, dest_port);
-        ptr=(byte*)buf+_fragmentSize;
+        nextPacketOffset &= 0x1FFF;
+        nextPacketOffset = preparePacket(aux, ptr, _fragmentSize, dest_addr, dest_port, (nextPacketOffset));// | ((remainder!=0)?0x2000:0x0000)));
+        ptr+=_fragmentSize;
         packets.push_back(aux);
     }    
 
     if(remainder != 0){
         aux = (net_packet *) malloc(sizeof(net_packet));
-        preparePacket(aux, ptr, remainder, dest_addr, dest_port);
+        nextPacketOffset &= 0x1FFF;
+        preparePacket(aux, ptr, remainder, dest_addr, dest_port, nextPacketOffset);
         packets.push_back(aux);
     }
 
@@ -51,7 +67,8 @@ ssize_t NetLayer::SendDataTo(const void * buf, size_t len, const char * dest_add
     _sendNetPackets(&packets, dest_addr, dest_port);
 }
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
-uint16_t NetLayer::preparePacket(net_packet * p, byte * payload, unsigned short payloadSize, const char * dest_addr, unsigned short dest_port) { /*return next packet offset*/
+uint16_t NetLayer::preparePacket(net_packet * p, byte * payload, unsigned short payloadSize, const char * dest_addr, unsigned short dest_port,
+                                    unsigned short nextOffsetFrag) { /*return next packet offset*/
     uint16_t ret=0;
     memset(p->datagram, 0, MTU);
     byte * data;
@@ -68,6 +85,12 @@ uint16_t NetLayer::preparePacket(net_packet * p, byte * payload, unsigned short 
     }
     
     memcpy(data, payload, payloadSize);
+    /////
+    // if(payloadSize%8!=0){
+    //     memset(data+payloadSize, '\0', 8-(payloadSize%8));
+    //     payloadSize+=(8-(payloadSize%8));
+    // }
+    /////
 
     p->iph->version = 4;
     p->iph->ihl = 5;
@@ -75,7 +98,8 @@ uint16_t NetLayer::preparePacket(net_packet * p, byte * payload, unsigned short 
     p->iph->tot_len = sizeof(struct iphdr) + ((_protoTCP)?sizeof(struct tcphdr):sizeof(struct udphdr)) + payloadSize;
     p->iph->id = htons(54321);//posso deixar fixo mas seria legal variar para fragmentacao e reassembly                 *
 //...
-    p->iph->frag_off = 0;
+    p->iph->frag_off = htons(nextOffsetFrag);
+    ret = 0;//nextOffsetFrag + payloadSize/8;
 //...
     p->iph->ttl = 255;
     p->iph->protocol = (_protoTCP) ? IPPROTO_TCP : IPPROTO_UDP;
@@ -103,7 +127,6 @@ uint16_t NetLayer::preparePacket(net_packet * p, byte * payload, unsigned short 
         p->udph->source = localaddr.sin_port;
         p->udph->dest = htons(dest_port);
         int aux = sizeof(struct udphdr) + payloadSize;
-        //aux += (aux%8==0)?0:1;
         p->udph->len = htons(aux);
         p->udph->check = 0;
     }
@@ -124,7 +147,6 @@ uint16_t NetLayer::preparePacket(net_packet * p, byte * payload, unsigned short 
         memcpy(pseudogram + sizeof(struct pseudo_header) , &p->tcph , (sizeof(struct tcphdr) + payloadSize));
         p->tcph->check = csum((unsigned short*) pseudogram , psize);
     }
-	    
     else {
         memcpy(pseudogram + sizeof(struct pseudo_header) , &p->udph , (sizeof(struct udphdr) + payloadSize));
         p->udph->check = csum((unsigned short*) pseudogram , psize);
@@ -206,6 +228,13 @@ void NetLayer::_initialize(bool tcp, unsigned short local_port, char * spoof_loc
 		perror("Error setting IP_HDRINCL");
 		return;
 	}
+
+    // one = IP_PMTUDISC_DONT;
+    // val = &one;
+    // if (setsockopt (s, IPPROTO_IP, IP_MTU_DISCOVER, val, sizeof (one)) < 0) {
+	// 	perror("Error setting IP_HDRINCL");
+	// 	return;
+	// }
 
 }
 void NetLayer::_terminate() {
